@@ -4,7 +4,7 @@
 export const config = {
   // Contract addresses (update after deployment)
   contracts: {
-    zkMint: process.env.NEXT_PUBLIC_ZK_MINT_CONTRACT_ADDRESS || "0x...", // Replace with your deployed contract
+    zkMint: process.env.NEXT_PUBLIC_ZK_MINT_CONTRACT_ADDRESS || "0x8C5909F15c15840B069c4fca78CcBC3116612a21",
   },
 
   // Network configuration

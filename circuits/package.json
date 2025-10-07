@@ -10,7 +10,7 @@
     "download-ptau": "curl -o powersOfTau28_hez_final_14.ptau https://storage.googleapis.com/zkevm/ptau/powersOfTau28_hez_final_14.ptau",
     "compile": "circom token_ownership.circom --r1cs --wasm --sym -o build/ -l node_modules/circomlib/circuits",
     "setup-keys": "pnpm snarkjs groth16 setup build/token_ownership.r1cs powersOfTau28_hez_final_14.ptau build/circuit_0000.zkey",
-    "contribute": "echo 'random entropy' | pnpm snarkjs zkey contribute build/circuit_0000.zkey build/circuit_final.zkey --name='first contribution'",
+    "contribute": "openssl rand -hex 32 | pnpm snarkjs zkey contribute build/circuit_0000.zkey build/circuit_final.zkey --name='trusted_setup_contribution'",
     "export-vkey": "pnpm snarkjs zkey export verificationkey build/circuit_final.zkey build/verification_key.json",
     "build": "mkdir -p build && pnpm run download-ptau && pnpm run compile && pnpm run setup-keys && pnpm run contribute && pnpm run export-vkey",
     "generate-proof": "node generate_proof.js",

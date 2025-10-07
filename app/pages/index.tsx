@@ -1,26 +1,57 @@
-import { ConnectWallet, useAddress, useContract, useContractWrite } from "@thirdweb-dev/react";
+import { ConnectButton, useActiveAccount } from "thirdweb/react";
+import { createThirdwebClient } from "thirdweb";
+import { defineChain } from "thirdweb/chains";
 import styles from "../styles/Home.module.css";
 import { NextPage } from "next";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ethers } from "ethers";
+import { config } from "../lib/config";
+
+// Create thirdweb client with production settings
+const client = createThirdwebClient({
+  clientId: config.thirdweb.clientId,
+});
+
+// Define Arbitrum Sepolia with public RPC
+const arbitrumSepolia = defineChain({
+  id: 421614,
+  name: "Arbitrum Sepolia",
+  nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
+  rpc: "https://sepolia-rollup.arbitrum.io/rpc",
+  blockExplorers: [
+    {
+      name: "Arbiscan",
+      url: "https://sepolia.arbiscan.io",
+    },
+  ],
+});
 
 const Home: NextPage = () => {
-  const address = useAddress();
-  const [tokenContract, setTokenContract] = useState("");
-  const [minBalance, setMinBalance] = useState("");
+  const account = useActiveAccount();
+  const address = account?.address;
   const [isGeneratingProof, setIsGeneratingProof] = useState(false);
   const [proofResult, setProofResult] = useState<any>(null);
   const [error, setError] = useState("");
+  const [provider, setProvider] = useState<ethers.BrowserProvider | null>(null);
+  const [signer, setSigner] = useState<ethers.JsonRpcSigner | null>(null);
 
-  // Replace with your deployed contract address
-  const ZK_MINT_CONTRACT_ADDRESS = "0x..."; // TODO: Update after contract deployment
+  // Setup ethers provider
+  useEffect(() => {
+    if (typeof window !== "undefined" && (window as any).ethereum) {
+      const ethersProvider = new ethers.BrowserProvider(
+        (window as any).ethereum
+      );
+      setProvider(ethersProvider);
 
-  const { contract } = useContract(ZK_MINT_CONTRACT_ADDRESS);
-  const { mutateAsync: mintWithProof } = useContractWrite(contract, "mint_with_zk_proof");
+      if (address) {
+        ethersProvider.getSigner().then(setSigner);
+      }
+    }
+  }, [address]);
 
   const generateProof = async () => {
-    if (!address || !tokenContract || !minBalance) {
-      setError("Please connect wallet and fill all fields");
+    if (!address) {
+      setError("Please connect wallet");
       return;
     }
 
@@ -29,21 +60,19 @@ const Home: NextPage = () => {
     setProofResult(null);
 
     try {
-      const response = await fetch('/api/generate-proof', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const response = await fetch("/api/generate-proof", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           userAddress: address,
-          tokenContract,
-          minRequiredBalance: parseFloat(minBalance),
-          salt: Math.floor(Math.random() * 1000000)
-        })
+          salt: Math.floor(Math.random() * 1000000),
+        }),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to generate proof');
+        throw new Error(data.error || "Failed to generate proof");
       }
 
       setProofResult(data);
@@ -55,26 +84,81 @@ const Home: NextPage = () => {
   };
 
   const mintNFT = async () => {
-    if (!proofResult || !address) return;
+    if (!proofResult || !address || !signer) {
+      setError("Please connect wallet and generate proof first");
+      return;
+    }
 
     try {
       setError("");
-      
-      // Format proof data for Stylus contract
-      const proofData = new Uint8Array(256); // 256 bytes for Groth16 proof
-      // TODO: Convert proofResult.proof to bytes format expected by Stylus
-      
-      const publicInputs = proofResult.publicSignals.map((signal: string) => 
-        ethers.BigNumber.from(signal)
+
+      // Correct contract ABI for Stylus ZK Mint contract
+      const contractABI = [
+        "function mintWithZkProof(address to, uint8[] memory proof_data, uint256[] memory public_inputs) external returns (uint256)",
+        "function verifyProof(uint8[] memory proof_data, uint256[] memory public_inputs) external view returns (bool)",
+        "function balanceOf(address owner) external view returns (uint256)",
+        "function ownerOf(uint256 token_id) external view returns (address)",
+        "function isVerifyingKeySet() external view returns (bool)",
+        "function getNextTokenId() external view returns (uint256)",
+      ];
+
+      // Create contract instance
+      const contract = new ethers.Contract(
+        config.contracts.zkMint,
+        contractABI,
+        signer
       );
 
-      await mintWithProof({
-        args: [address, proofData, publicInputs]
-      });
+      // Convert hex proof to uint8 array
+      const proofHex = proofResult.proof.startsWith("0x")
+        ? proofResult.proof.slice(2)
+        : proofResult.proof;
+      const proofBytes = Array.from(ethers.getBytes("0x" + proofHex));
 
-      alert("NFT minted successfully!");
+      // Public signals as BigNumbers
+      const publicInputs = proofResult.publicSignals.map((signal: string) =>
+        BigInt(signal)
+      );
+
+      try {
+        const isVkSet = await contract.isVerifyingKeySet();
+        const nextTokenId = await contract.getNextTokenId();
+      } catch (contractError: any) {
+        console.error("  Contract state check failed:", contractError);
+        throw new Error(
+          `Contract state check failed: ${contractError.message}`
+        );
+      }
+
+      // First try to verify the proof to debug the issue
+      try {
+        const isValid = await contract.verifyProof(proofBytes, publicInputs);
+      } catch (verifyError: any) {
+        console.error("  Proof verification failed:", verifyError);
+        console.error("  Error details:", {
+          message: verifyError.message,
+          code: verifyError.code,
+          data: verifyError.data,
+        });
+        throw new Error(`Proof verification failed: ${verifyError.message}`);
+      }
+
+      // Call contract function
+      console.log("🚀 Calling mintWithZkProof...");
+      const tx = await contract.mintWithZkProof(
+        address,
+        proofBytes,
+        publicInputs
+      );
+
+      setError("Transaction sent! Waiting for confirmation...");
+      await tx.wait();
+
+      alert("🎉 NFT minted successfully!");
       setProofResult(null);
+      setError("");
     } catch (err: any) {
+      console.error("Mint error:", err);
       setError(err.message || "Failed to mint NFT");
     }
   };
@@ -88,47 +172,52 @@ const Home: NextPage = () => {
           </h1>
 
           <p className={styles.description}>
-            Mint NFTs by proving token ownership without revealing your balance
+            Mint NFTs by proving you have at least 0.01 ETH without revealing
+            your exact balance
           </p>
 
           <div className={styles.connect}>
-            <ConnectWallet />
+            <ConnectButton
+              client={client}
+              chain={arbitrumSepolia}
+              connectModal={{ size: "compact" }}
+            />
           </div>
         </div>
 
         {address && (
           <div className={styles.mintSection}>
             <div className={styles.card}>
-              <h2>Prove Token Ownership & Mint</h2>
-              
-              <div className={styles.inputGroup}>
-                <label>Token Contract Address:</label>
-                <input
-                  type="text"
-                  placeholder="0x..."
-                  value={tokenContract}
-                  onChange={(e) => setTokenContract(e.target.value)}
-                  className={styles.input}
-                />
-              </div>
+              <h2>Prove ETH Balance & Mint</h2>
 
-              <div className={styles.inputGroup}>
-                <label>Minimum Balance Required:</label>
-                <input
-                  type="number"
-                  placeholder="100"
-                  value={minBalance}
-                  onChange={(e) => setMinBalance(e.target.value)}
-                  className={styles.input}
-                />
+              <div className={styles.infoBox}>
+                <p>
+                  <strong>Requirements:</strong>
+                </p>
+                <p>
+                  • Connected wallet must have at least 0.01 ETH on Arbitrum
+                  Sepolia
+                </p>
+                <p>
+                  • Proof will verify balance without revealing exact amount
+                </p>
+                <p>• Your current address: {address}</p>
+                <p>
+                  • Current network:{" "}
+                  {(window as any).ethereum?.chainId
+                    ? parseInt((window as any).ethereum.chainId, 16)
+                    : "Unknown"}
+                </p>
               </div>
 
               <button
                 onClick={generateProof}
-                disabled={isGeneratingProof || !address || !tokenContract || !minBalance}
+                disabled={isGeneratingProof || !address}
                 className={styles.button}
               >
-                {isGeneratingProof ? "Generating Proof..." : "Generate ZK Proof"}
+                {isGeneratingProof
+                  ? "Generating Proof..."
+                  : "Generate ZK Proof"}
               </button>
 
               {error && <div className={styles.error}>{error}</div>}
@@ -136,14 +225,12 @@ const Home: NextPage = () => {
               {proofResult && (
                 <div className={styles.proofResult}>
                   <h3>✅ Proof Generated!</h3>
-                  <p>Token: {proofResult.metadata.tokenSymbol}</p>
-                  <p>Your Balance: {proofResult.metadata.userBalance}</p>
-                  <p>Required: {proofResult.metadata.requiredBalance}</p>
-                  
-                  <button
-                    onClick={mintNFT}
-                    className={styles.button}
-                  >
+                  <p>Asset: {proofResult.metadata.token}</p>
+                  <p>Your Balance: {proofResult.metadata.userBalance} ETH</p>
+                  <p>Required: {proofResult.metadata.requiredBalance} ETH</p>
+                  <p>Network: {proofResult.metadata.network}</p>
+
+                  <button onClick={mintNFT} className={styles.button}>
                     Mint NFT with Proof
                   </button>
                 </div>

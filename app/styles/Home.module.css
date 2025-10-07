@@ -33,6 +33,23 @@
   -webkit-text-fill-color: transparent;
 }
 
+.infoBox {
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+  padding: 1rem;
+  margin: 1rem 0;
+}
+
+.infoBox p {
+  margin: 0.5rem 0;
+  color: #495057;
+}
+
+.infoBox strong {
+  color: #212529;
+}
+
 .title a:hover,
 .title a:focus,
 .title a:active {

@@ -1,34 +1,48 @@
 #!/usr/bin/env node
 
-const fs = require('fs');
-const path = require('path');
+const fs = require("fs");
+const path = require("path");
 
-console.log('🔑 Injecting verifying key into Stylus contract...');
+console.log("🔑 Injecting verifying key into Stylus contract...");
 
 // Read the verification key (from project root)
-const vkPath = path.join(__dirname, '..', 'circuits', 'build', 'verification_key.json');
+const vkPath = path.join(
+  __dirname,
+  "..",
+  "circuits",
+  "build",
+  "verification_key.json"
+);
 if (!fs.existsSync(vkPath)) {
-  console.error('❌ Verification key not found. Run circuit build first.');
+  console.error("❌ Verification key not found. Run circuit build first.");
   process.exit(1);
 }
 
-const vk = JSON.parse(fs.readFileSync(vkPath, 'utf8'));
-console.log('✅ Loaded verification key');
+const vk = JSON.parse(fs.readFileSync(vkPath, "utf8"));
+console.log("✅ Loaded verification key");
 
 // Convert VK to raw bytes format for Rust
 function pointToBytes(point) {
-  const x = BigInt(point[0]).toString(16).padStart(64, '0');
-  const y = BigInt(point[1]).toString(16).padStart(64, '0');
-  return `[${hexToByteArray(x).join(', ')}, ${hexToByteArray(y).join(', ')}]`;
+  const x = BigInt(point[0]).toString(16).padStart(64, "0");
+  const y = BigInt(point[1]).toString(16).padStart(64, "0");
+  return `[${hexToByteArray(x).join(", ")}, ${hexToByteArray(y).join(", ")}]`;
 }
 
 function g2PointToBytes(point) {
-  const x0 = BigInt(point[0][0]).toString(16).padStart(64, '0');
-  const x1 = BigInt(point[0][1]).toString(16).padStart(64, '0');
-  const y0 = BigInt(point[1][0]).toString(16).padStart(64, '0');
-  const y1 = BigInt(point[1][1]).toString(16).padStart(64, '0');
-  
-  return `[${hexToByteArray(x0).join(', ')}, ${hexToByteArray(x1).join(', ')}, ${hexToByteArray(y0).join(', ')}, ${hexToByteArray(y1).join(', ')}]`;
+  // EIP-197: Fp2 element (a*i + b) encoded as (a, b)
+  // Our JSON has [[x_real, x_imag], [y_real, y_imag], [1, 0]]
+  // JSON represents real + imag*i, but EIP-197 wants a*i + b encoded as (a, b)
+  // So we need: [x_imag, x_real, y_imag, y_real] for EVM format
+  const x_real = BigInt(point[0][0]).toString(16).padStart(64, "0");
+  const x_imag = BigInt(point[0][1]).toString(16).padStart(64, "0");
+  const y_real = BigInt(point[1][0]).toString(16).padStart(64, "0");
+  const y_imag = BigInt(point[1][1]).toString(16).padStart(64, "0");
+
+  return `[${hexToByteArray(x_imag).join(", ")}, ${hexToByteArray(x_real).join(
+    ", "
+  )}, ${hexToByteArray(y_imag).join(", ")}, ${hexToByteArray(y_real).join(
+    ", "
+  )}]`;
 }
 
 function hexToByteArray(hex) {
@@ -45,12 +59,12 @@ const betaG2 = g2PointToBytes(vk.vk_beta_2);
 const gammaG2 = g2PointToBytes(vk.vk_gamma_2);
 const deltaG2 = g2PointToBytes(vk.vk_delta_2);
 
-let gammaAbcG1 = '[';
+let gammaAbcG1 = "[";
 for (let i = 0; i < vk.IC.length; i++) {
   gammaAbcG1 += pointToBytes(vk.IC[i]);
-  if (i < vk.IC.length - 1) gammaAbcG1 += ', ';
+  if (i < vk.IC.length - 1) gammaAbcG1 += ", ";
 }
-gammaAbcG1 += ']';
+gammaAbcG1 += "]";
 
 // Generate the complete verifying_key.rs file
 const rustVkCode = `// Auto-generated verifying key implementation
@@ -119,8 +133,14 @@ impl ZKMintContract {
 }`;
 
 // Write the verifying_key.rs file
-const vkFilePath = path.join(__dirname, '..', 'contracts', 'src', 'verifying_key.rs');
+const vkFilePath = path.join(
+  __dirname,
+  "..",
+  "contracts",
+  "src",
+  "verifying_key.rs"
+);
 fs.writeFileSync(vkFilePath, rustVkCode);
 
-console.log('✅ Generated contracts/src/verifying_key.rs');
-console.log('🎉 Contract is ready for compilation and deployment!');
+console.log("✅ Generated contracts/src/verifying_key.rs");
+console.log("🎉 Contract is ready for compilation and deployment!");
