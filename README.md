@@ -1,6 +1,6 @@
-# ZK Mint Template
+# ZK Mint ERC20 Template
 
-A complete template for building privacy-preserving NFT minting using Zero-Knowledge proofs and Arbitrum Stylus.
+A complete template for building privacy-preserving ERC20 token minting using Zero-Knowledge proofs and Arbitrum Stylus.
 
 ## 🚀 Features
 
@@ -69,19 +69,19 @@ stylus-zk-mint/
 
 ## 📋 How It Works
 
-### For Users (NFT Minters)
+### For Users (ERC20 Token Minters)
 
 1. Connect wallet to the dApp
 2. Enter a token contract address and minimum balance
 3. Generate ZK proof (proves you own ≥ X tokens without revealing exact amount)
-4. Mint NFT using the proof
+4. Mint ERC20 tokens using the proof
 
 ### Technical Flow
 
 1. **Frontend** calls API route with user's wallet address and token requirements
 2. **API route** checks actual on-chain token balance via RPC
 3. **ZK Circuit** generates proof that `actual_balance >= required_balance`
-4. **Smart Contract** verifies the proof and mints NFT
+4. **Smart Contract** verifies the proof and mints ERC20 tokens
 
 ## 🔒 Privacy Benefits
 

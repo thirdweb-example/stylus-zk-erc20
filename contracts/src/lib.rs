@@ -1,6 +1,6 @@
 extern crate alloc;
 use alloc::vec::Vec;
-use alloy_primitives::{Address, U256};
+use alloy_primitives::{Address, U256, U8};
 use stylus_sdk::{
     prelude::*,
     call::RawCall,
@@ -236,11 +236,14 @@ sol_storage! {
     #[entrypoint]
     pub struct ZKMintContract {
         address owner;
-        uint256 next_token_id;
-        mapping(uint256 => address) token_owners;
-        mapping(address => uint256) token_balances;
-        mapping(uint256 => address) token_approvals;
-        mapping(address => mapping(address => bool)) operator_approvals;
+        uint256 total_supply;
+        mapping(address => uint256) balances;
+        mapping(address => mapping(address => uint256)) allowances;
+        
+        // ERC20 metadata
+        string name;
+        string symbol;
+        uint8 decimals;
         
         // Nullifier tracking to prevent replay attacks
         mapping(uint256 => bool) used_nullifiers;
@@ -250,9 +253,18 @@ sol_storage! {
 #[public]
 impl ZKMintContract {
     #[constructor]
-    pub fn constructor(&mut self, owner: Address) -> Result<(), Vec<u8>> {
+    pub fn constructor(
+        &mut self, 
+        owner: Address,
+        name: String,
+        symbol: String,
+        decimals: u8
+    ) -> Result<(), Vec<u8>> {
         self.owner.set(owner);
-        self.next_token_id.set(U256::from(1));
+        self.total_supply.set(U256::ZERO);
+        self.name.set_str(&name);
+        self.symbol.set_str(&symbol);
+        self.decimals.set(U8::from(decimals));
 
         Ok(())
     }
@@ -285,15 +297,16 @@ impl ZKMintContract {
     }
 
     // ========================================================================
-    // NFT MINTING
+    // ERC20 TOKEN MINTING
     // ========================================================================
 
     pub fn mint_with_zk_proof(
         &mut self,
         to: Address,
+        amount: U256,
         proof_data: Vec<u8>,
         public_inputs: Vec<U256>,
-    ) -> Result<U256, Vec<u8>> {
+    ) -> Result<bool, Vec<u8>> {
         // Check we have the expected number of public inputs (nullifier + 5 inputs)
         if public_inputs.len() != 6 {
             return Err("Invalid number of public inputs".into());
@@ -315,40 +328,92 @@ impl ZKMintContract {
         // Mark nullifier as used to prevent future replay
         self.used_nullifiers.setter(nullifier).set(true);
 
-        // Mint the NFT
-        let token_id = self.next_token_id.get();
-        self.token_owners.setter(token_id).set(to);
+        // Mint the tokens
+        let current_balance = self.balances.getter(to).get();
+        self.balances.setter(to).set(current_balance + amount);
         
-        let current_balance = self.token_balances.getter(to).get();
-        self.token_balances.setter(to).set(current_balance + U256::from(1));
+        let current_supply = self.total_supply.get();
+        self.total_supply.set(current_supply + amount);
         
-        self.next_token_id.set(token_id + U256::from(1));
-        
-        Ok(token_id)
+        Ok(true)
     }
 
     // ========================================================================
-    // ERC721 VIEW FUNCTIONS
+    // ERC20 STANDARD FUNCTIONS
     // ========================================================================
+
+    pub fn name(&self) -> Result<String, Vec<u8>> {
+        Ok(self.name.get_string())
+    }
+
+    pub fn symbol(&self) -> Result<String, Vec<u8>> {
+        Ok(self.symbol.get_string())
+    }
+
+    pub fn decimals(&self) -> u8 {
+        self.decimals.get().to()
+    }
+
+    pub fn total_supply(&self) -> U256 {
+        self.total_supply.get()
+    }
 
     pub fn balance_of(&self, owner: Address) -> U256 {
-        self.token_balances.getter(owner).get()
+        self.balances.getter(owner).get()
     }
 
-    pub fn owner_of(&self, token_id: U256) -> Result<Address, Vec<u8>> {
-        let owner = self.token_owners.getter(token_id).get();
-        if owner == Address::ZERO {
-            return Err("Token does not exist".into());
+    pub fn allowance(&self, owner: Address, spender: Address) -> U256 {
+        self.allowances.getter(owner).getter(spender).get()
+    }
+
+    pub fn transfer(&mut self, from: Address, to: Address, amount: U256) -> Result<bool, Vec<u8>> {
+        self._transfer(from, to, amount)
+    }
+
+    pub fn approve(&mut self, owner: Address, spender: Address, amount: U256) -> Result<bool, Vec<u8>> {
+        self.allowances.setter(owner).setter(spender).set(amount);
+        Ok(true)
+    }
+
+    pub fn transfer_from(
+        &mut self,
+        from: Address,
+        to: Address,
+        amount: U256,
+    ) -> Result<bool, Vec<u8>> {
+        let from_balance = self.balances.getter(from).get();
+        if from_balance < amount {
+            return Err("Insufficient balance".into());
         }
-        Ok(owner)
-    }
-
-    pub fn get_next_token_id(&self) -> U256 {
-        self.next_token_id.get()
+        
+        self.balances.setter(from).set(from_balance - amount);
+        let to_balance = self.balances.getter(to).get();
+        self.balances.setter(to).set(to_balance + amount);
+        
+        Ok(true)
     }
 }
 
 impl ZKMintContract {
+    fn _transfer(&mut self, from: Address, to: Address, amount: U256) -> Result<bool, Vec<u8>> {
+        if from == Address::ZERO {
+            return Err("Transfer from zero address".into());
+        }
+        if to == Address::ZERO {
+            return Err("Transfer to zero address".into());
+        }
+        
+        let from_balance = self.balances.getter(from).get();
+        if from_balance < amount {
+            return Err("Insufficient balance".into());
+        }
+        
+        self.balances.setter(from).set(from_balance - amount);
+        let to_balance = self.balances.getter(to).get();
+        self.balances.setter(to).set(to_balance + amount);
+        
+        Ok(true)
+    }
 
     fn groth16_verify(
         &self,

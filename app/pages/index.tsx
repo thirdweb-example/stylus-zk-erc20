@@ -83,7 +83,7 @@ const Home: NextPage = () => {
     }
   };
 
-  const mintNFT = async () => {
+  const mintTokens = async () => {
     if (!proofResult || !address || !signer) {
       setError("Please connect wallet and generate proof first");
       return;
@@ -92,14 +92,18 @@ const Home: NextPage = () => {
     try {
       setError("");
 
-      // Correct contract ABI for Stylus ZK Mint contract
+      // Contract ABI for Stylus ZK Mint ERC20 contract
       const contractABI = [
-        "function mintWithZkProof(address to, uint8[] memory proof_data, uint256[] memory public_inputs) external returns (uint256)",
+        "function mintWithZkProof(address to, uint256 amount, uint8[] memory proof_data, uint256[] memory public_inputs) external returns (bool)",
         "function verifyProof(uint8[] memory proof_data, uint256[] memory public_inputs) external view returns (bool)",
         "function balanceOf(address owner) external view returns (uint256)",
-        "function ownerOf(uint256 token_id) external view returns (address)",
-        "function isVerifyingKeySet() external view returns (bool)",
-        "function getNextTokenId() external view returns (uint256)",
+        "function totalSupply() external view returns (uint256)",
+        "function name() external view returns (string)",
+        "function symbol() external view returns (string)",
+        "function decimals() external view returns (uint8)",
+        "function transfer(address from, address to, uint256 amount) external returns (bool)",
+        "function approve(address owner, address spender, uint256 amount) external returns (bool)",
+        "function allowance(address owner, address spender) external view returns (uint256)",
       ];
 
       // Create contract instance
@@ -121,8 +125,9 @@ const Home: NextPage = () => {
       );
 
       try {
-        const isVkSet = await contract.isVerifyingKeySet();
-        const nextTokenId = await contract.getNextTokenId();
+        const totalSupply = await contract.totalSupply();
+        const tokenName = await contract.name();
+        console.log(`Token: ${tokenName}, Total Supply: ${totalSupply}`);
       } catch (contractError: any) {
         console.error("  Contract state check failed:", contractError);
         throw new Error(
@@ -143,10 +148,14 @@ const Home: NextPage = () => {
         throw new Error(`Proof verification failed: ${verifyError.message}`);
       }
 
+      // Define mint amount (1 token with 18 decimals)
+      const mintAmount = ethers.parseEther("1");
+      
       // Call contract function
       console.log("🚀 Calling mintWithZkProof...");
       const tx = await contract.mintWithZkProof(
         address,
+        mintAmount,
         proofBytes,
         publicInputs
       );
@@ -154,12 +163,12 @@ const Home: NextPage = () => {
       setError("Transaction sent! Waiting for confirmation...");
       await tx.wait();
 
-      alert("🎉 NFT minted successfully!");
+      alert("🎉 ERC20 tokens minted successfully!");
       setProofResult(null);
       setError("");
     } catch (err: any) {
       console.error("Mint error:", err);
-      setError(err.message || "Failed to mint NFT");
+      setError(err.message || "Failed to mint tokens");
     }
   };
 
@@ -172,7 +181,7 @@ const Home: NextPage = () => {
           </h1>
 
           <p className={styles.description}>
-            Mint NFTs by proving you have at least 0.01 ETH without revealing
+            Mint ERC20 tokens by proving you have at least 0.01 ETH without revealing
             your exact balance
           </p>
 
@@ -188,7 +197,7 @@ const Home: NextPage = () => {
         {address && (
           <div className={styles.mintSection}>
             <div className={styles.card}>
-              <h2>Prove ETH Balance & Mint</h2>
+              <h2>Prove ETH Balance & Mint Tokens</h2>
 
               <div className={styles.infoBox}>
                 <p>
@@ -230,8 +239,8 @@ const Home: NextPage = () => {
                   <p>Required: {proofResult.metadata.requiredBalance} ETH</p>
                   <p>Network: {proofResult.metadata.network}</p>
 
-                  <button onClick={mintNFT} className={styles.button}>
-                    Mint NFT with Proof
+                  <button onClick={mintTokens} className={styles.button}>
+                    Mint ERC20 Tokens with Proof
                   </button>
                 </div>
               )}
